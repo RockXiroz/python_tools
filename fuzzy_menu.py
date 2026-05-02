@@ -16,11 +16,16 @@ Usage example
     FuzzyMenu(tools).run()
 """
 
+import json
+import subprocess
 import sys
 import tty
 import termios
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
+
+CACHE_FILE = Path.home() / ".fuzzy_menu_cache.json"
 
 
 @dataclass
@@ -186,6 +191,47 @@ class FuzzyMenu:
             print(SHOW_CUR, end="", flush=True)
 
 
+# ── shell-command cache ───────────────────────────────────────────────────────
+
+def _load_cache() -> list[str]:
+    if CACHE_FILE.exists():
+        return json.loads(CACHE_FILE.read_text())
+    return []
+
+
+def _save_to_cache(cmd: str) -> None:
+    cmds = _load_cache()
+    if cmd in cmds:
+        cmds.remove(cmd)
+    cmds.insert(0, cmd)
+    CACHE_FILE.write_text(json.dumps(cmds[:200], indent=2))
+
+
+def shell_command_tool() -> None:
+    """Prompt for a shell command, execute it, and persist it to the cache."""
+    print("\033[1mShell command:\033[0m ", end="", flush=True)
+    cmd = input().strip()
+    if not cmd:
+        print("\033[90m(nothing entered)\033[0m")
+        return
+    _save_to_cache(cmd)
+    print(f"\033[90m$ {cmd}\033[0m")
+    subprocess.run(cmd, shell=True)
+
+
+def cache_search_tool() -> None:
+    """Fuzzy-search the saved command cache and execute the chosen entry."""
+    cmds = _load_cache()
+    if not cmds:
+        print("\033[33mCache is empty — run a shell command first.\033[0m")
+        return
+    cache_tools = {
+        cmd: RunTool(cmd, lambda c=cmd: subprocess.run(c, shell=True))
+        for cmd in cmds
+    }
+    FuzzyMenu(cache_tools).run()
+
+
 # ── demo ──────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -202,12 +248,14 @@ if __name__ == "__main__":
         print("Tailing logs...")
 
     demo_tools = {
-        "run_reboot":      RunTool("Reboot the system immediately",       _reboot),
-        "run_status":      RunTool("Show current system status",          _status),
-        "run_deploy":      RunTool("Deploy the latest build",             _deploy),
-        "run_logs":        RunTool("Tail application logs",               _logs),
-        "run_backup":      RunTool("Create a full system backup",         lambda: print("Backing up...")),
-        "run_health_check":RunTool("Run all health-check probes",         lambda: print("All probes passed.")),
+        "run_reboot":        RunTool("Reboot the system immediately",              _reboot),
+        "run_status":        RunTool("Show current system status",                 _status),
+        "run_deploy":        RunTool("Deploy the latest build",                    _deploy),
+        "run_logs":          RunTool("Tail application logs",                      _logs),
+        "run_backup":        RunTool("Create a full system backup",                lambda: print("Backing up...")),
+        "run_health_check":  RunTool("Run all health-check probes",                lambda: print("All probes passed.")),
+        "run_shell_command": RunTool("Execute a shell command and save to cache",  shell_command_tool),
+        "run_cache_search":  RunTool("Fuzzy-search saved commands and execute",    cache_search_tool),
     }
 
     FuzzyMenu(demo_tools).run()
