@@ -219,21 +219,25 @@ def shell_command_tool() -> None:
     subprocess.run(cmd, shell=True)
 
 
-def _prefill_input(prompt: str, prefill: str) -> str:
-    """Show *prefill* as editable text in a readline input line."""
-    import readline
-    def _hook():
-        readline.insert_text(prefill)
-        readline.redisplay()
-    readline.set_pre_input_hook(_hook)
-    try:
-        return input(prompt)
-    finally:
-        readline.set_pre_input_hook(None)
+def _copy_to_clipboard(text: str) -> bool:
+    """Copy *text* to the system clipboard; returns True on success."""
+    candidates = [
+        ["xclip", "-selection", "clipboard"],
+        ["xsel", "--clipboard", "--input"],
+        ["wl-copy"],
+    ]
+    for cmd in candidates:
+        try:
+            subprocess.run(cmd, input=text.encode(), check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            continue
+    return False
 
 
 def cache_search_tool() -> None:
-    """Fuzzy-search the saved command cache; paste selection onto the console."""
+    """Fuzzy-search the saved command cache and copy the selection to clipboard."""
     cmds = _load_cache()
     if not cmds:
         print("\033[33mCache is empty — run a shell command first.\033[0m")
@@ -241,11 +245,8 @@ def cache_search_tool() -> None:
 
     selected: list[str] = []
 
-    def _pick(cmd: str) -> None:
-        selected.append(cmd)
-
     cache_tools = {
-        cmd: RunTool(cmd, lambda c=cmd: _pick(c))
+        cmd: RunTool(cmd, lambda c=cmd: selected.append(c))
         for cmd in cmds
     }
     FuzzyMenu(cache_tools).run()
@@ -253,14 +254,12 @@ def cache_search_tool() -> None:
     if not selected:
         return
 
-    # Paste the command into an editable input line — user presses Enter to run
-    try:
-        cmd = _prefill_input("\033[1m$\033[0m ", selected[0])
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return
-    if cmd.strip():
-        subprocess.run(cmd, shell=True)
+    cmd = selected[0]
+    if _copy_to_clipboard(cmd):
+        print(f"\033[32mCopied:\033[0m {cmd}")
+    else:
+        print(f"\033[33mClipboard tool not found (xclip/xsel/wl-copy).\033[0m")
+        print(f"\033[1mCommand:\033[0m {cmd}")
 
 
 # ── demo ──────────────────────────────────────────────────────────────────────
